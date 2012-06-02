@@ -1,7 +1,7 @@
 #!/bin/bash
-if [ -z "$1" ]
+if [ -z "$1" -o -z "$2" -o -z "$3" ]
 then
-    echo Usage: $0 input_file >&2
+    echo Usage: $0 input_file columns rows '[margin=120]' >&2
     exit 1
 fi
 
@@ -11,26 +11,45 @@ then
     echo Not found: "$INPUT.pdf" >&2
     exit 2
 fi
+COLUMNS=$2
+ROWS=$3
 
-PAGES=$(pdfinfo ${INPUT}.pdf | grep Pages | cut -d ":" -f 2 | sed 's/ //g')
+pdfinfo=$(pdfinfo -box ${INPUT}.pdf)
+PAGES=$(grep '^Pages:' <<<"$pdfinfo" | cut -d ":" -f 2 | sed 's/ //g')
 i=1
-params=""
 tmp=$(mktemp -d)
 trap "rm -r $tmp" EXIT
 
-pdfcrop --bbox '120 465 475 730' $INPUT.pdf $tmp/${INPUT}_A.pdf
-pdfcrop --bbox '120 115 475 380' $INPUT.pdf $tmp/${INPUT}_B.pdf
+psize=$(awk -v m=${4:-120} '
+/^CropBox:/ { print int($4-$2-2*m), int($5-$3-2*m)}' <<<"$pdfinfo")
+read pwidth pheight <<<"$psize"
+width=$(($pwidth/$COLUMNS))
+height=$(($pheight/$ROWS))
+cropped=$tmp/cropped.pdf
+pdfcrop --bbox "$(awk -v m=${4:-120} '
+    /^CropBox:/ { print $2+m, $3+m, $4-m, $5-m}' <<<"$pdfinfo"
+)" $INPUT.pdf $cropped
+
+for y in $(seq $ROWS)
+do
+    yrev=$(($ROWS-$y))
+    ytop=$(($height*(${yrev}+1)))
+    ybottom=$(($height*$yrev))
+    for x in $(seq $COLUMNS)
+    do
+        xleft=$(($width*(${x}-1)))
+        xright=$(($width*$x))
+        pdfcrop --clip --bbox "$xleft $ybottom $xright $ytop" $cropped "$tmp/${INPUT}_${y}_${x}.pdf"
+    done
+done
+
 cd $tmp
-while [ $i -lt $PAGES ]; do
-    pdftk A=${INPUT}_A.pdf B=${INPUT}_B.pdf cat A$i B$i output ${INPUT}_part_${i}.pdf
-    i=$[$i+1]
+for i in ${INPUT}_*.pdf
+do
+    f=${i##${INPUT}_}
+    pdftk $i burst output "${INPUT}_part_%04d_$f"
 done
-i=1
-while [ $i -lt $PAGES ]; do
-    params="$params ${INPUT}_part_${i}.pdf"
-    i=$[$i+1]
-done
-pdftk $params cat output ${INPUT}_kindle.pdf
+pdftk ${INPUT}_part_*.pdf cat output ${INPUT}_kindle.pdf
 cd -
 mv $tmp/${INPUT}_kindle.pdf ${INPUT}_tmp.pdf
 pdftk ${INPUT}_tmp.pdf cat 1-endW output ${INPUT}_kindle.pdf
