@@ -1,5 +1,17 @@
 #!/bin/bash
-INPUT=$1
+if [ -z "$1" ]
+then
+    echo Usage: $0 input_file >&2
+    exit 1
+fi
+
+INPUT=${1%%.pdf}
+if [ ! -f "$INPUT.pdf" ]
+then
+    echo Not found: "$INPUT.pdf" >&2
+    exit 2
+fi
+
 PAGES=$(pdfinfo ${INPUT}.pdf | grep Pages | cut -d ":" -f 2 | sed 's/ //g')
 i=1
 params=""
